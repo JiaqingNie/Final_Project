@@ -90,6 +90,8 @@ class LabelEmbedder(nn.Module):
         use_dropout = self.dropout_prob > 0
         if (train and use_dropout) or (force_drop_ids is not None):
             labels = self.token_drop(labels, force_drop_ids)
+        assert labels.min() >= 0, f"Minimum label index {labels.max()} is less than 0"
+        assert labels.max() < self.embedding_table.weight.size(0), f"Maximum label index {labels.max()} is larger than the embedding table size"
         embeddings = self.embedding_table(labels)
         return embeddings
 
@@ -152,11 +154,11 @@ class DiT(nn.Module):
         patch_size=2,
         in_channels=4,
         hidden_size=1152,
-        depth=28,
-        num_heads=16,
+        depth=18,
+        num_heads=12,
         mlp_ratio=4.0,
         class_dropout_prob=0.1,
-        num_classes=1000,
+        num_classes=3,
         learn_sigma=True,
     ):
         super().__init__()

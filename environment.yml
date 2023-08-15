@@ -1,4 +1,4 @@
-name: DiT
+name: prj
 channels:
   - pytorch
   - nvidia
@@ -7,7 +7,10 @@ dependencies:
   - pytorch >= 1.13
   - torchvision
   - pytorch-cuda=11.7
+  - pip
   - pip:
     - timm
     - diffusers
     - accelerate
+    - taming-transformers
+    - pytorch_lightning
