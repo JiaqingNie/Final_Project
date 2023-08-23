@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 from taming.modules.losses.vqperceptual import *  
 
@@ -22,10 +23,10 @@ def process_discriminator_output(d_out, epsilon=1e-12):
     return log_output
 
 class LPIPSWithDiscriminator(nn.Module):
-    def __init__(self, disc_start=50001, logvar_init=0.0, kl_weight=1.0e-06, pixelloss_weight=1.0,
+    def __init__(self, disc_start=50001, logvar_init=0.0, kl_weight=2.0, pixelloss_weight=1.0,
                  disc_num_layers=3, disc_in_channels=3, disc_factor=1.0, disc_weight=0.5,
                  perceptual_weight=1.0, use_actnorm=False, disc_conditional=False,
-                 disc_loss="hinge"):
+                 disc_loss="hinge", num_epochs=8):
 
         super().__init__()
         assert disc_loss in ["hinge", "vanilla"]
@@ -45,6 +46,7 @@ class LPIPSWithDiscriminator(nn.Module):
         self.disc_factor = disc_factor
         self.discriminator_weight = disc_weight
         self.disc_conditional = disc_conditional
+        self.num_epochs = num_epochs
 
     def calculate_adaptive_weight(self, nll_loss, g_loss, last_layer=None):
         if last_layer is not None:
@@ -58,9 +60,16 @@ class LPIPSWithDiscriminator(nn.Module):
         d_weight = torch.clamp(d_weight, 0.0, 1e4).detach()
         d_weight = d_weight * self.discriminator_weight
         return d_weight
-
+    
+    def calculate_kl_weight(self, curr_epoch, num_epochs):
+        if curr_epoch is None:
+            return self.kl_weight
+        else:
+            # exponential annealing
+            return self.kl_weight * np.exp(-10 * (1 - curr_epoch / num_epochs) ** 2)
+    
     def forward(self, inputs, reconstructions, posteriors, optimizer_idx,
-                global_step, last_layer=None, cond=None, split="train",
+                global_step, last_layer=None, cond=None, split="train", curr_epoch=None,
                 weights=None):
         rec_loss = torch.abs(inputs.contiguous() - reconstructions.contiguous())
         if self.perceptual_weight > 0:
@@ -73,6 +82,7 @@ class LPIPSWithDiscriminator(nn.Module):
             weighted_nll_loss = weights*nll_loss
         weighted_nll_loss = torch.sum(weighted_nll_loss) / weighted_nll_loss.shape[0]
         nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
+        kl_weight = self.calculate_kl_weight(curr_epoch, self.num_epochs)
         kl_loss = posteriors.kl()
         kl_loss = torch.sum(kl_loss) / kl_loss.shape[0]
 
@@ -85,9 +95,13 @@ class LPIPSWithDiscriminator(nn.Module):
             else:
                 assert self.disc_conditional
                 logits_fake = self.discriminator(torch.cat((reconstructions.contiguous(), cond), dim=1))
-            logits_fake = process_discriminator_output(logits_fake)
-            # User negative logits for generator loss
-            g_loss = -torch.mean(logits_fake)
+            #logits_fake = process_discriminator_output(logits_fake)
+            #g_loss = -torch.mean(logits_fake)
+            
+            target = torch.ones_like(logits_fake)
+            bce_loss = torch.nn.functional.binary_cross_entropy_with_logits(logits_fake, target)
+            
+            g_loss = torch.mean(bce_loss)
 
             if self.disc_factor > 0.0:
                 try:
@@ -99,7 +113,7 @@ class LPIPSWithDiscriminator(nn.Module):
                 d_weight = torch.tensor(0.0)
 
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
-            loss = weighted_nll_loss + self.kl_weight * kl_loss + d_weight * disc_factor * g_loss
+            loss = weighted_nll_loss + kl_weight * kl_loss + d_weight * disc_factor * g_loss
 
             log = {"{}/total_loss".format(split): loss.clone().detach().mean(), "{}/logvar".format(split): self.logvar.detach(),
                    "{}/kl_loss".format(split): kl_loss.detach().mean(), "{}/nll_loss".format(split): nll_loss.detach().mean(),

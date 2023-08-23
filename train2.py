@@ -34,8 +34,41 @@ from torchvision.utils import save_image
 
 from models import DiT_models
 from diffusion import create_diffusion
-from TVQVAE import TVQVAE
+from autoencoder import TAutoencoderKL
 
+def eval(model, vae, rank, epoch=0,num_classes=3, cfg_scale=4.0, latent_size=16, num_sampling_steps=1000, channels=4):
+    device = rank % torch.cuda.device_count()
+    torch.cuda.set_device(device)
+    
+    class_labels = []
+    for i in range(num_classes):
+        for _ in range(10):
+            class_labels.append(i)
+
+    # Create sampling noise:
+    n = len(class_labels)
+    z = torch.randn(n, channels, latent_size, latent_size, device=device)
+    y = torch.tensor(class_labels, device=device)
+    y_original = y.clone()
+
+    # Setup classifier-free guidance:
+    z = torch.cat([z, z], 0)
+    y_null = torch.tensor([num_classes] * n, device=device)
+    y = torch.cat([y, y_null], 0)
+    model_kwargs = dict(y=y, cfg_scale=cfg_scale)
+    diffusion = create_diffusion(str(num_sampling_steps))
+    # Sample images:
+    samples = diffusion.p_sample_loop(
+        model.module.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
+    )
+    #
+    samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
+    #samples = vae.module.decode(samples / 0.18215, y_original)
+    # 
+    # Save and display images:
+    
+    save_image(samples, f"./eval/{epoch}.png", nrow=10, normalize=True, value_range=(-1, 1))
+    
 class LSUNWithLabels:
     def __init__(self, lsun_classes, root_dir, transform=None, num_samples=50000):
         self.datasets = []
@@ -140,37 +173,6 @@ def center_crop_arr(pil_image, image_size):
     crop_x = (arr.shape[1] - image_size) // 2
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
-def eval(model, rank, epoch=0,num_classes=3, cfg_scale=4.0, latent_size=64, num_sampling_steps=1000):
-    device = rank % torch.cuda.device_count()
-    torch.cuda.set_device(device)
-    
-    class_labels = []
-    for i in range(num_classes):
-        for _ in range(10):
-            class_labels.append(i)
-
-    # Create sampling noise:
-    n = len(class_labels)
-    z = torch.randn(n, 3, latent_size, latent_size, device=device)
-    y = torch.tensor(class_labels, device=device)
-    y_original = y.clone()
-
-    # Setup classifier-free guidance:
-    z = torch.cat([z, z], 0)
-    y_null = torch.tensor([num_classes] * n, device=device)
-    y = torch.cat([y, y_null], 0)
-    model_kwargs = dict(y=y, cfg_scale=cfg_scale)
-    diffusion = create_diffusion(str(num_sampling_steps))
-    # Sample images:
-    samples = diffusion.p_sample_loop(
-        model.module.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
-    )
-    #
-    samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
-    # 
-    # Save and display images:
-    
-    save_image(samples, f"./eval/{epoch}.png", nrow=10, normalize=True, value_range=(-1, 1))
 
 #################################################################################
 #                                  Training Loop                                #
@@ -183,19 +185,20 @@ def train(rank, world_size):
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
     setup(rank, world_size)
     latent_size = 64
+    latent_channels = 3
     num_samples = 50000
     data_path = "/project/TVQVAE/data/lsun"
-    #vae_path = "/project/TVQVAE/results/1691516614/TVQVAE.pt"
+    vae_path = "/project/T-Autoencoder-KL/results/1692118484/TAKL-7.pt"
     results_dir = "./results"
-    batch_size = 1
+    batch_size = 8
     num_classes = 3
     img_size = 64
-    epochs = 15
+    epochs = 100
     global_seed = 0
     model = "DiT-B/2"
     num_workers = 4
     log_every = 100
-    ckpt_every = 1
+    ckpt_every = 3
     
     rank = dist.get_rank()
     device = rank % torch.cuda.device_count()
@@ -221,15 +224,16 @@ def train(rank, world_size):
     
     model = DiT_models[model](
         input_size=latent_size,
-        num_classes=num_classes
+        num_classes=num_classes,
+        in_channels=latent_channels,
     )
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
     model = DDP(model.to(device), device_ids=[rank])
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    #vae = torch.load(vae_path)
-    #vae = vae.to(device)
+    vae = torch.load(vae_path)
+    vae = vae.to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
@@ -265,7 +269,7 @@ def train(rank, world_size):
     update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
-    #vae.eval()
+    vae.eval()
 
     # Variables for monitoring/logging purposes:
     train_steps = 0
@@ -278,7 +282,7 @@ def train(rank, world_size):
         "latent_size": latent_size,
         "num_samples": num_samples,
         "data_path": data_path,
-        #"vae_path": vae_path,
+        "vae_path": vae_path,
         "results_dir": results_dir,
         "batch_size": batch_size,
         "num_classes": num_classes,
@@ -287,7 +291,6 @@ def train(rank, world_size):
         "global_seed": global_seed,
         "model": model
     }
-    
     if rank == 0:
         checkpoint = {
             "model": model.module.state_dict(),
@@ -295,12 +298,10 @@ def train(rank, world_size):
             "opt": opt.state_dict(),
             "args": args
         }
-        checkpoint_path = f"{checkpoint_dir}/before_train.pt"
+        checkpoint_path = f"{checkpoint_dir}/{train_steps//ckpt_every:07d}.pt"
         torch.save(checkpoint, checkpoint_path)
         logger.info(f"Saved checkpoint to {checkpoint_path}")
-        
-        # eval 
-        eval(model, rank=rank, epoch=0)
+        #eval(model, vae, rank=rank, epoch=0, latent_size=latent_size, channels=latent_channels)
     dist.barrier()
     
     logger.info(f"Training for {epochs} epochs...")
@@ -311,11 +312,6 @@ def train(rank, world_size):
             x = x.to(device)
             y = y.to(device)
             
-            #with torch.no_grad():
-                # Map input images to latent space + normalize latents:
-                #x = vae.module.encoder(x, y)
-                #x, _ = vae.module.codebook.straight_through(x)
-                #x = x.mul(0.18215)
             
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
@@ -358,9 +354,7 @@ def train(rank, world_size):
                 checkpoint_path = f"{checkpoint_dir}/{train_steps//ckpt_every:07d}.pt"
                 torch.save(checkpoint, checkpoint_path)
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
-                
-                # eval 
-                eval(model, rank=rank, epoch=epoch)
+                eval(model, vae, rank=rank, epoch=epoch+1, latent_size=latent_size, channels=latent_channels)
             dist.barrier()
 
     model.eval()  # important! This disables randomized embedding dropout

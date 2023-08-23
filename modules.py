@@ -8,7 +8,6 @@ from enum import Enum
 from typing import Union
 from itertools import repeat
 import collections.abc
-from functions import vq, vq_st
 
 
 _HAS_FUSED_ATTN = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
@@ -330,7 +329,7 @@ class FirstLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, latent_dim, image_size=32, patch_size=4, in_channels=1, hidden_size=1152, depth=12, num_heads=6, mlp_ratio=4.0, num_classes=10, dropout_prob=0.1):
+    def __init__(self, latent_dim, image_size=32, patch_size=4, in_channels=1, hidden_size=1152, depth=12, num_heads=6, mlp_ratio=4.0, num_classes=10, dropout_prob=0.1, double_z=True):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = in_channels
@@ -349,9 +348,12 @@ class Encoder(nn.Module):
             Block(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, self.latent_dim)
-        
         latent_channels = latent_dim[2]
-        self.final_conv = nn.Conv2d(self.num_patches * latent_channels, latent_channels, kernel_size=3, stride=1, padding=1, bias=True)
+        if double_z:
+            self.final_conv = nn.Conv2d(self.num_patches * latent_channels, 2 * latent_channels, kernel_size=3, stride=1, padding=1, bias=True)
+        else:
+            self.final_conv = nn.Conv2d(self.num_patches * latent_channels, latent_channels, kernel_size=3, stride=1, padding=1, bias=True)
+            
         self.initialize_weights()
         
     

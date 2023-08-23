@@ -14,3 +14,4 @@ dependencies:
     - accelerate
     - taming-transformers
     - pytorch_lightning
+    - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers

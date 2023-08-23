@@ -194,9 +194,10 @@ def train(rank, world_size):
     setup(rank, world_size)
     latent_size = 16
     latent_channels = 4
-    num_samples = 50000
+    num_samples = 5000
     data_path = "/project/TVQVAE/data/lsun"
     vae_path = "/project/T-Autoencoder-KL/results/1692549226/TAKL-9.pt"
+    #vae_path = "/project/T-Autoencoder-KL/results/1692270786/TAKL-7.pt"
     results_dir = "./results"
     batch_size = 16
     num_classes = 3
@@ -325,16 +326,13 @@ def train(rank, world_size):
                 posterior = vae.module.encode(x, y)
                 x = posterior.sample()
                 
-                #print(f"post_mean:{posterior.mean.mean()}")
-                #print(f"post_std:{posterior.std.mean()}")
-                
-                #print(f"data_mean:{x.mean()}")
-                #print(f"data_std:{x.std()}")
+                print(f"data_mean:{x.mean()}")
+                print(f"data_std:{x.std()}")
                 
                 x = x.add(-post_mean).mul(scale_factor)
                 
-                #print(f"x_mean:{x.mean()}")
-                #print(f"x_std:{x.std()}")
+                print(f"x_mean:{x.mean()}")
+                print(f"x_std:{x.std()}")
     
             
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)

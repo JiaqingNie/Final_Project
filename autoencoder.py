@@ -23,6 +23,8 @@ class TAutoencoderKL(pl.LightningModule):
                  z_channels=None,
                  lr=0.0001,
                  disc_start=50001,
+                 kl_weight=1.0e-6,
+                 num_epochs=8,
                  ):
         super().__init__()
         if latent_dim is None:
@@ -40,7 +42,7 @@ class TAutoencoderKL(pl.LightningModule):
         #self.image_key = image_key
         self.encoder = Encoder(self.latent_dim, image_size=image_size, patch_size=patch_size, in_channels=in_channels, hidden_size=hidden_size, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, num_classes=num_classes, dropout_prob=dropout_prob)
         self.decoder = Decoder(self.latent_dim, image_size=image_size, patch_size=patch_size, in_channels=in_channels, hidden_size=hidden_size, depth=depth, num_heads=num_heads, mlp_ratio=mlp_ratio, num_classes=num_classes, dropout_prob=dropout_prob)
-        self.loss = LPIPSWithDiscriminator(disc_start=disc_start)
+        self.loss = LPIPSWithDiscriminator(disc_start=disc_start, kl_weight=kl_weight, num_epochs=num_epochs)
 
         self.embed_dim = self.latent_dim[2]
         self.quant_conv = torch.nn.Conv2d(2*self.z_channels, 2*self.embed_dim, 1)
@@ -121,3 +123,5 @@ class TVQVAE(nn.Module):
         z_q_x_st, z_q_x = self.codebook.straight_through(z_e_x)
         x_tilde = self.decoder(z_q_x_st, y)
         return x_tilde, z_e_x, z_q_x
+        
+        
