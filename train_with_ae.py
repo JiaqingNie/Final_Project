@@ -34,10 +34,10 @@ from torchvision.utils import save_image
 
 from models import DiT_models
 from diffusion import create_diffusion
-from autoencoder import TAutoencoderKL
+from diffusers.models import AutoencoderKL
 
 post_mean = 0.0
-post_std = 1.25
+post_std = 1.0 / 0.18215
 scale_factor = 1 / post_std
 
 def eval(model, vae, rank, epoch=0,num_classes=3, cfg_scale=4.0, latent_size=16, num_sampling_steps=1000, channels=4):
@@ -70,7 +70,7 @@ def eval(model, vae, rank, epoch=0,num_classes=3, cfg_scale=4.0, latent_size=16,
     print(f"Diffusion samples mean: {samples.mean()}, std: {samples.std()}")   
     samples = samples * post_std + post_mean
     print(f"postprecessed samples mean: {samples.mean()}, std: {samples.std()}")
-    samples = vae.module.decode(samples, y_original)
+    samples = vae.module.decode(samples, return_dict=False)[0]
     print(f"vae decoded mean: {samples.mean()}, std: {samples.std()}")
     # 
     # Save and display images:
@@ -194,10 +194,9 @@ def train(rank, world_size):
     setup(rank, world_size)
     latent_size = 16
     latent_channels = 4
-    num_samples = 5000
+    num_samples = 50000
     data_path = "/workspace/project/data"
-    vae_path = "/workspace/project/T-Autoencoder-KL/results/1692785043/TAKL-9.pt"
-    #vae_path = "/project/T-Autoencoder-KL/results/1692270786/TAKL-7.pt"
+    vae_path = "/workspace/project/Autoencoder-KL/results/1692965183/TAKL-3.pt"
     results_dir = "./results"
     batch_size = 16
     num_classes = 3
@@ -323,16 +322,19 @@ def train(rank, world_size):
             
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
-                posterior = vae.module.encode(x, y)
+                posterior = vae.module.encode(x).latent_dist
                 x = posterior.sample()
                 
-                print(f"data_mean:{x.mean()}")
-                print(f"data_std:{x.std()}")
+                #print(f"post_mean:{posterior.mean.mean()}")
+                #print(f"post_std:{posterior.std.mean()}")
+                
+                #print(f"data_mean:{x.mean()}")
+                #print(f"data_std:{x.std()}")
                 
                 x = x.add(-post_mean).mul(scale_factor)
                 
-                print(f"x_mean:{x.mean()}")
-                print(f"x_std:{x.std()}")
+                #print(f"x_mean:{x.mean()}")
+                #print(f"x_std:{x.std()}")
     
             
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)

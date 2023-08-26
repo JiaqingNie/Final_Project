@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Union
 from itertools import repeat
 import collections.abc
+from functions import vq, vq_st
 
 
 _HAS_FUSED_ATTN = hasattr(torch.nn.functional, 'scaled_dot_product_attention')

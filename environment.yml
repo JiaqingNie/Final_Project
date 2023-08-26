@@ -11,7 +11,10 @@ dependencies:
   - pip:
     - timm
     - diffusers
+    - lmdb
     - accelerate
     - taming-transformers
+    - einops
+    - matplotlib
     - pytorch_lightning
     - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers

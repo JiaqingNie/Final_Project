@@ -37,7 +37,7 @@ from diffusion import create_diffusion
 from autoencoder import TAutoencoderKL
 
 post_mean = 0.0
-post_std = 1.25
+post_std = 1.0
 scale_factor = 1 / post_std
 
 def eval(model, vae, rank, epoch=0,num_classes=3, cfg_scale=4.0, latent_size=16, num_sampling_steps=1000, channels=4):
@@ -195,8 +195,8 @@ def train(rank, world_size):
     latent_size = 16
     latent_channels = 4
     num_samples = 50000
-    data_path = "/project/TVQVAE/data/lsun"
-    vae_path = "/project/T-Autoencoder-KL/results/1692549226/TAKL-9.pt"
+    data_path = "/workspace/project/data"
+    vae_path = "/workspace/project/T-Autoencoder-KL/results/1692785043/TAKL-9.pt"
     results_dir = "./results"
     batch_size = 16
     num_classes = 3
